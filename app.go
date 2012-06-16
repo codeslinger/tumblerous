@@ -80,6 +80,9 @@ func (req *Request) Reply(status int, body string) {
     req.SetHeader("Content-Type", req.contentType)
     req.SetHeader("Content-Length", strconv.Itoa(req.contentLength))
   }
+  if req.status >= 400 {
+    req.SetHeader("Connection", "close")
+  }
   req.replied = true
   req.w.WriteHeader(req.status)
   if req.contentLength > 0 {
