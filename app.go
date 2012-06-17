@@ -2,15 +2,18 @@
 package main
 
 import (
+  "bytes"
   "fmt"
-  "log"
   "net/http"
+  "os"
   "regexp"
   "runtime"
   "strconv"
   "strings"
   "time"
 )
+
+// --- REQUEST API ----------------------------------------------------------
 
 type Request struct {
   w             http.ResponseWriter
@@ -21,36 +24,6 @@ type Request struct {
   contentType   string
   date          time.Time
   replied       bool
-}
-
-type RouteHandler func(*Request, []string)
-
-type route struct {
-  pattern string
-  re      *regexp.Regexp
-  method  string
-  handler RouteHandler
-}
-
-type App struct {
-  host         string
-  port         int
-  templatePath string
-  routes       []route
-}
-
-func newRequest(w http.ResponseWriter, r *http.Request, app *App) *Request {
-  req := &Request {
-    w:             w,
-    r:             r,
-    app:           app,
-    status:        200,
-    contentLength: 0,
-    contentType:   "text/html; charset=utf-8",
-    date:          time.Now(),
-    replied:       false,
-  }
-  return req
 }
 
 func (req *Request) SetHeader(name, val string) {
@@ -71,7 +44,7 @@ func (req *Request) NotFound(body string) {
 
 func (req *Request) Reply(status int, body string) {
   if req.replied {
-    log.Panic("this context has already been replied to!")
+    req.app.Log.Critical("this context has already been replied to!")
   }
   req.status = status
   req.contentLength = len(body)
@@ -90,20 +63,34 @@ func (req *Request) Reply(status int, body string) {
   }
 }
 
+// --- REQUEST INTERNALS ----------------------------------------------------
+
+func newRequest(w http.ResponseWriter, r *http.Request, app *App) *Request {
+  req := &Request {
+    w:             w,
+    r:             r,
+    app:           app,
+    status:        200,
+    contentLength: 0,
+    contentType:   "text/html; charset=utf-8",
+    date:          time.Now(),
+    replied:       false,
+  }
+  return req
+}
+
 func (req *Request) logHit() {
-  timestamp := req.date.Format("02/Jan/2006:15:04:05 -0700")
   bytesSent := "-"
   if req.contentLength > 0 {
     bytesSent = strconv.Itoa(req.contentLength)
   }
-  fmt.Printf("%s - - [%s] \"%s %s %s\" %d %s\n",
-             req.r.RemoteAddr,
-             timestamp,
-             req.r.Method,
-             req.r.URL.Path,
-             req.r.Proto,
-             req.status,
-             bytesSent)
+  req.app.Log.Info("hit: %s %s %s %s %d %s\n",
+                   req.r.RemoteAddr,
+                   req.r.Method,
+                   req.r.URL.Path,
+                   req.r.Proto,
+                   req.status,
+                   bytesSent)
 }
 
 func (req *Request) httpDate(t time.Time) string {
@@ -114,28 +101,54 @@ func (req *Request) httpDate(t time.Time) string {
   return f
 }
 
-func NewApp(host string, port int, templatePath string) *App {
+// --- APP API --------------------------------------------------------------
+
+type RouteHandler func(*Request, []string)
+
+type route struct {
+  pattern string
+  re      *regexp.Regexp
+  method  string
+  handler RouteHandler
+}
+
+type App struct {
+  Log          *Logger
+  LogHits      bool
+  host         string
+  port         int
+  templatePath string
+  routes       []route
+}
+
+func NewApp(host string, port int, templatePath string, lvl Level) *App {
   app := &App {
-    host: host,
-    port: port,
+    Log:          NewLogger(os.Stdout, lvl, 2),
+    LogHits:      true,
+    host:         host,
+    port:         port,
     templatePath: templatePath,
   }
   return app
 }
 
 func (app *App) Run() {
+  addr := fmt.Sprintf("%s:%d", app.host, app.port)
   s := &http.Server {
-    Addr:           fmt.Sprintf("%s:%d", app.host, app.port),
+    Addr:           addr,
     Handler:        app,
     ReadTimeout:    10 * time.Second,
     WriteTimeout:   10 * time.Second,
     MaxHeaderBytes: 1 << 20,
   }
+  app.Log.Info("application started: listening on %s", addr)
   err := s.ListenAndServe()
   if err != nil {
-    log.Fatal(err)
+    app.Log.Error(err)
   }
 }
+
+// --- ROUTE REGISTRATION ---------------------------------------------------
 
 func (app *App) Get(pattern string, handler RouteHandler) {
   app.registerRoute(pattern, "GET", handler)
@@ -153,6 +166,8 @@ func (app *App) Delete(pattern string, handler RouteHandler) {
   app.registerRoute(pattern, "DELETE", handler)
 }
 
+// --- APP INTERNALS --------------------------------------------------------
+
 func (app *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
   req := newRequest(w, r, app)
   path := r.URL.Path
@@ -165,36 +180,40 @@ func (app *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
       continue
     }
     match := route.re.FindStringSubmatch(path)
-    err := app.safeRun(route.handler, req, match[1:])
+    err := app.protect(route.handler, req, match[1:])
     if err != nil {
       req.Reply(500, "Internal server error")
     }
     return
   }
   req.NotFound("<h1>Not found</h1>")
-  req.logHit()
+  if req.app.LogHits {
+    req.logHit()
+  }
 }
 
 func (app *App) registerRoute(pattern string, method string, handler RouteHandler) {
   re, err := regexp.Compile(pattern)
   if err != nil {
-    log.Panicf("could not compile route pattern: %q", pattern)
+    app.Log.Critical("could not compile route pattern: %q", pattern)
   }
   app.routes = append(app.routes, route{pattern, re, method, handler})
 }
 
-func (app *App) safeRun(handler RouteHandler, req *Request, args []string) (e interface{}) {
+func (app *App) protect(handler RouteHandler, req *Request, args []string) (e interface{}) {
   defer func() {
     if err := recover(); err != nil {
       e = err
-      log.Println("handler crashed", err)
-      for i := 1; ; i++ {
+      var buf bytes.Buffer
+      fmt.Fprintf(&buf, "handler crashed: %v\n", err)
+      for i := 2; ; i++ {
         _, file, line, ok := runtime.Caller(i)
         if !ok {
           break
         }
-        log.Println(file, line)
+        fmt.Fprintf(&buf, "! %s:%d\n", file, line)
       }
+      app.Log.Error(buf.String())
     }
   }()
   handler(req, args)

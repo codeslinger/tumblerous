@@ -7,15 +7,21 @@ import (
 )
 
 var (
-  host = flag.String("host", "127.0.0.1", "host address on which to listen")
-  port = flag.Int("port", 9999, "port on which to listen")
-  template_path = flag.String("templates", "/var/www", "path to template files")
+  host          string
+  port          int
+  template_path string
 )
 
-func main() {
+func init() {
+  flag.StringVar(&host, "host", "127.0.0.1", "host address on which to listen")
+  flag.IntVar(&port, "port", 9999, "port on which to listen")
+  flag.StringVar(&template_path, "templates", "/var/www", "path to template files")
   flag.Parse()
+}
+
+func main() {
   runtime.GOMAXPROCS(runtime.NumCPU())
-  app := NewApp(*host, *port, *template_path)
+  app := NewApp(host, port, template_path, INFO)
   app.Run()
 }
 
