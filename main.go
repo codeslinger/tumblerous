@@ -2,6 +2,8 @@
 package main
 
 import (
+  "github.com/codeslinger/log"
+  "github.com/codeslinger/webapp"
   "flag"
   "os"
   "runtime"
@@ -20,7 +22,8 @@ func init() {
 
 func main() {
   runtime.GOMAXPROCS(runtime.NumCPU())
-  app := NewWebapp(host, port, NewLogger(os.Stdout, INFO))
+  logger := log.NewLogger(os.Stdout, log.INFO)
+  app := webapp.NewWebapp(host, port, logger)
   app.Run()
 }
 
