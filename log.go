@@ -13,6 +13,7 @@ import (
 
 // --- LOG LEVELS -----------------------------------------------------------
 
+// Priority level of log message.
 type Level int
 
 const (
@@ -26,6 +27,7 @@ const (
 
 var levelStrings = [...]string {"T", "D", "I", "W", "E", "C"}
 
+// String representation of priority level.
 func (l Level) String() string {
   if l < 0 || int(l) > len(levelStrings) {
     return "UNKNOWN"
@@ -35,6 +37,9 @@ func (l Level) String() string {
 
 // --- LOGGER API -----------------------------------------------------------
 
+// Logger allows for serialized output to a sink of log messages, filtering
+// any incoming messages below the specified priority level. The Logger is
+// safe to use from concurrent goroutines.
 type Logger struct {
   mutex     sync.Mutex
   level     Level
@@ -43,14 +48,19 @@ type Logger struct {
   callDepth int
 }
 
+// Create a new Logger. The callDepth param refers to the number of stack
+// frames to ignore when determining the file/line of the calling function.
+// Typically, this should be 2.
 func NewLogger(out io.Writer, lvl Level, callDepth int) *Logger {
   return &Logger{sink: out, level: lvl, callDepth: callDepth}
 }
 
+// Get the lowest priority level for which this Logger will emit messages.
 func (log *Logger) GetLevel() Level {
   return log.level
 }
 
+// Set the lowest priority level for which this Logger will emit messages.
 func (log *Logger) SetLevel(lvl Level) {
   if lvl < TRACE || lvl > CRITICAL {
     return
@@ -58,6 +68,7 @@ func (log *Logger) SetLevel(lvl Level) {
   log.level = lvl
 }
 
+// Log a TRACE level message to this Logger.
 func (log *Logger) Trace(arg0 interface{}, args ...interface{}) {
   switch first := arg0.(type) {
   case string:
@@ -70,6 +81,7 @@ func (log *Logger) Trace(arg0 interface{}, args ...interface{}) {
   }
 }
 
+// Log a DEBUG level message to this Logger.
 func (log *Logger) Debug(arg0 interface{}, args ...interface{}) {
   switch first := arg0.(type) {
   case string:
@@ -82,6 +94,7 @@ func (log *Logger) Debug(arg0 interface{}, args ...interface{}) {
   }
 }
 
+// Log an INFO level message to this Logger.
 func (log *Logger) Info(arg0 interface{}, args ...interface{}) {
   switch first := arg0.(type) {
   case string:
@@ -94,6 +107,7 @@ func (log *Logger) Info(arg0 interface{}, args ...interface{}) {
   }
 }
 
+// Log a WARN level message to this Logger.
 func (log *Logger) Warn(arg0 interface{}, args ...interface{}) {
   switch first := arg0.(type) {
   case string:
@@ -106,6 +120,7 @@ func (log *Logger) Warn(arg0 interface{}, args ...interface{}) {
   }
 }
 
+// Log an ERROR level message to this Logger.
 func (log *Logger) Error(arg0 interface{}, args ...interface{}) {
   switch first := arg0.(type) {
   case string:
@@ -118,6 +133,8 @@ func (log *Logger) Error(arg0 interface{}, args ...interface{}) {
   }
 }
 
+// Log a CRITICAL level message to this Logger. This will also generate a panic
+// with the log message after the message has been written to the log.
 func (log *Logger) Critical(arg0 interface{}, args ...interface{}) {
   msg := ""
   switch first := arg0.(type) {
@@ -135,42 +152,59 @@ func (log *Logger) Critical(arg0 interface{}, args ...interface{}) {
 
 // --- SINGLETON INTERFACE ---------------------------------------------------
 
+// The default logger will write to STDERR and emit messages for all priority
+// levels.
 var dfl = NewLogger(os.Stderr, TRACE, 3)
 
+// Get the lowest priority level for which the default logger will emit a
+// message.
 func GetLevel() Level {
   return dfl.GetLevel()
 }
 
+// Set the lowest priority level for which the default logger will emit a
+// message.
 func SetLevel(lvl Level) {
   dfl.SetLevel(lvl)
 }
 
+// Log a TRACE level message to the default logger.
 func Trace(arg0 interface{}, args ...interface{}) {
   dfl.Trace(arg0, args...)
 }
 
+// Log a TRACE level message to the default logger.
 func Debug(arg0 interface{}, args ...interface{}) {
   dfl.Debug(arg0, args...)
 }
 
+// Log a TRACE level message to the default logger.
 func Info(arg0 interface{}, args ...interface{}) {
   dfl.Info(arg0, args...)
 }
 
+// Log a TRACE level message to the default logger.
 func Warn(arg0 interface{}, args ...interface{}) {
   dfl.Warn(arg0, args...)
 }
 
+// Log a TRACE level message to the default logger.
 func Error(arg0 interface{}, args ...interface{}) {
   dfl.Error(arg0, args...)
 }
 
+// Log a CRITICAL level message to the default logger. This will also
+// generate a panic with the log message after the message has been written
+// to the log.
 func Critical(arg0 interface{}, args ...interface{}) {
   dfl.Critical(arg0, args...)
 }
 
 // --- CLOSURE FACTORY ------------------------------------------------------
 
+// Build a closure to generate a log message. This is used to defer
+// potentially expensive computation in the case where the log message is
+// not likely to be emitted given its low priority level.
 func Closure(format string, args ...interface{}) func() string {
   return func() string {
     return fmt.Sprintf(format, args...)
@@ -179,6 +213,7 @@ func Closure(format string, args ...interface{}) func() string {
 
 // --- INTERNAL FUNCTIONS ---------------------------------------------------
 
+// Log a message via format string and args.
 func (log *Logger) logf(lvl Level, format string, args ...interface{}) string {
   if lvl < log.level {
     return ""
@@ -196,6 +231,7 @@ func (log *Logger) logf(lvl Level, format string, args ...interface{}) string {
   return msg
 }
 
+// Log a message via a call to a closure.
 func (log *Logger) logc(lvl Level, closure func() string) string {
   if lvl < log.level {
     return ""
@@ -210,6 +246,7 @@ func (log *Logger) logc(lvl Level, closure func() string) string {
   return msg
 }
 
+// Write a message to the log sink.
 func (log *Logger) write(lvl Level, now time.Time, file string, line int, msg string) error {
   log.mutex.Lock()
   defer log.mutex.Unlock()
@@ -223,6 +260,7 @@ func (log *Logger) write(lvl Level, now time.Time, file string, line int, msg st
   return err
 }
 
+// Concatenate the log message prefix to the given byte array.
 func (log *Logger) fmtPrefix(buf *[]byte, lvl Level, t time.Time, file string, line int) {
   hdr := fmt.Sprintf("%s [%s %d] (%s:%d) ",
                      levelStrings[int(lvl)],
@@ -233,6 +271,7 @@ func (log *Logger) fmtPrefix(buf *[]byte, lvl Level, t time.Time, file string, l
   *buf = append(*buf, hdr...)
 }
 
+// Determine a the base name of a file. (i.e. shortname)
 func (log *Logger) fileBasename(file string) string {
   short := file
   for i := len(file) - 1; i > 0; i-- {
