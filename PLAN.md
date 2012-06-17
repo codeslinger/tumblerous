@@ -10,6 +10,7 @@ Tumblerous Plan
     * Post title and content to API to create new post on form submission
 * Markdown -> HTML
     * Use Github-flavored Markdown
+    * [blackfriday](https://github.com/russross/blackfriday)?
 * User login (Go)
     * OpenID is fine for this
 * User logout (Go)
