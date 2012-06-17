@@ -48,11 +48,10 @@ type Logger struct {
   callDepth int
 }
 
-// Create a new Logger. The callDepth param refers to the number of stack
-// frames to ignore when determining the file/line of the calling function.
-// Typically, this should be 2.
-func NewLogger(out io.Writer, lvl Level, callDepth int) *Logger {
-  return &Logger{sink: out, level: lvl, callDepth: callDepth}
+// Create a new Logger that outputs to the given sink and has the given
+// minimum priority level.
+func NewLogger(out io.Writer, lvl Level) *Logger {
+  return newLogger(out, lvl, 2)
 }
 
 // Get the lowest priority level for which this Logger will emit messages.
@@ -154,7 +153,7 @@ func (log *Logger) Critical(arg0 interface{}, args ...interface{}) {
 
 // The default logger will write to STDERR and emit messages for all priority
 // levels.
-var dfl = NewLogger(os.Stderr, TRACE, 3)
+var dfl = newLogger(os.Stderr, TRACE, 3)
 
 // Get the lowest priority level for which the default logger will emit a
 // message.
@@ -212,6 +211,13 @@ func Closure(format string, args ...interface{}) func() string {
 }
 
 // --- INTERNAL FUNCTIONS ---------------------------------------------------
+
+// Generate a new Logger instance. This constructor allows us to specify the
+// callDepth, needed because the singleton instance uses a different depth
+// than a regular Logger instance.
+func newLogger(out io.Writer, lvl Level, callDepth int) *Logger {
+  return &Logger{sink: out, level: lvl, callDepth: callDepth}
+}
 
 // Log a message via format string and args.
 func (log *Logger) logf(lvl Level, format string, args ...interface{}) string {

@@ -3,25 +3,24 @@ package main
 
 import (
   "flag"
+  "os"
   "runtime"
 )
 
 var (
-  host          string
-  port          int
-  template_path string
+  host string
+  port int
 )
 
 func init() {
   flag.StringVar(&host, "host", "127.0.0.1", "host address on which to listen")
   flag.IntVar(&port, "port", 9999, "port on which to listen")
-  flag.StringVar(&template_path, "templates", "/var/www", "path to template files")
   flag.Parse()
 }
 
 func main() {
   runtime.GOMAXPROCS(runtime.NumCPU())
-  app := NewApp(host, port, template_path, INFO)
+  app := NewWebapp(host, port, NewLogger(os.Stdout, INFO))
   app.Run()
 }
 

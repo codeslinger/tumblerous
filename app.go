@@ -5,7 +5,6 @@ import (
   "bytes"
   "fmt"
   "net/http"
-  "os"
   "regexp"
   "runtime"
   "strconv"
@@ -20,7 +19,7 @@ import (
 type Request struct {
   w             http.ResponseWriter
   r             *http.Request
-  app           *App
+  app           *Webapp
   status        int
   contentLength int
   contentType   string
@@ -78,8 +77,8 @@ func (req *Request) Reply(status int, body string) {
 // --- REQUEST INTERNALS ----------------------------------------------------
 
 // Private constructor for Request records. These should only be created by
-// an App instance.
-func newRequest(w http.ResponseWriter, r *http.Request, app *App) *Request {
+// an Webapp instance.
+func newRequest(w http.ResponseWriter, r *http.Request, app *Webapp) *Request {
   req := &Request {
     w:             w,
     r:             r,
@@ -133,39 +132,29 @@ func (req *Request) httpDate(t time.Time) string {
 // matched between the "bar" and the end of the string.
 type RouteHandler func(*Request, []string)
 
-type route struct {
-  pattern string
-  re      *regexp.Regexp
-  method  string
-  handler RouteHandler
+// An Webapp is the main edifice for a web application.
+type Webapp struct {
+  Log     *Logger
+  LogHits bool
+  host    string
+  port    int
+  routes  []route
 }
 
-// An App is the main edifice for a web application.
-type App struct {
-  Log          *Logger
-  LogHits      bool
-  host         string
-  port         int
-  templatePath string
-  routes       []route
-}
-
-// Create a new App instance. The host and port on which to listen are given,
-// as is the path to any templates the application will need, as well as the
-// minimum log level for messages output to the log.
-func NewApp(host string, port int, templatePath string, lvl Level) *App {
-  app := &App {
-    Log:          NewLogger(os.Stdout, lvl, 2),
-    LogHits:      true,
-    host:         host,
-    port:         port,
-    templatePath: templatePath,
+// Create a new Webapp instance. The host and port on which to listen are given,
+// as well as the Logger to use.
+func NewWebapp(host string, port int, log *Logger) *Webapp {
+  app := &Webapp {
+    Log:     log,
+    LogHits: true,
+    host:    host,
+    port:    port,
   }
   return app
 }
 
-// Start the App listening and serving requests.
-func (app *App) Run() {
+// Start the Webapp listening and serving requests.
+func (app *Webapp) Run() {
   addr := fmt.Sprintf("%s:%d", app.host, app.port)
   s := &http.Server {
     Addr:           addr,
@@ -185,29 +174,37 @@ func (app *App) Run() {
 
 // Register a route for a given pattern for GET requests. (will also be called
 // for HEAD requests)
-func (app *App) Get(pattern string, handler RouteHandler) {
+func (app *Webapp) Get(pattern string, handler RouteHandler) {
   app.registerRoute(pattern, "GET", handler)
 }
 
 // Register a route for a given pattern for POST requests.
-func (app *App) Post(pattern string, handler RouteHandler) {
+func (app *Webapp) Post(pattern string, handler RouteHandler) {
   app.registerRoute(pattern, "POST", handler)
 }
 
 // Register a route for a given pattern for PUT requests.
-func (app *App) Put(pattern string, handler RouteHandler) {
+func (app *Webapp) Put(pattern string, handler RouteHandler) {
   app.registerRoute(pattern, "PUT", handler)
 }
 
 // Register a route for a given pattern for DELETE requests.
-func (app *App) Delete(pattern string, handler RouteHandler) {
+func (app *Webapp) Delete(pattern string, handler RouteHandler) {
   app.registerRoute(pattern, "DELETE", handler)
 }
 
 // --- APP INTERNALS --------------------------------------------------------
 
-// Main callback for App instance on receipt of new HTTP request.
-func (app *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+// Describes an individual route pattern and its associated handler.
+type route struct {
+  pattern string
+  re      *regexp.Regexp
+  method  string
+  handler RouteHandler
+}
+
+// Main callback for Webapp instance on receipt of new HTTP request.
+func (app *Webapp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
   req := newRequest(w, r, app)
   path := r.URL.Path
   for i := 0; i < len(app.routes); i++ {
@@ -232,8 +229,8 @@ func (app *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // Does the work of registering a route pattern and handler with this
-// App instance.
-func (app *App) registerRoute(pattern string, method string, handler RouteHandler) {
+// Webapp instance.
+func (app *Webapp) registerRoute(pattern string, method string, handler RouteHandler) {
   re, err := regexp.Compile(pattern)
   if err != nil {
     app.Log.Critical("could not compile route pattern: %q", pattern)
@@ -243,7 +240,7 @@ func (app *App) registerRoute(pattern string, method string, handler RouteHandle
 
 // Run a RouteHandler safely, ensuring that panics inside handlers are trapped
 // and logged.
-func (app *App) protect(handler RouteHandler, req *Request, args []string) (e interface{}) {
+func (app *Webapp) protect(handler RouteHandler, req *Request, args []string) (e interface{}) {
   defer func() {
     if err := recover(); err != nil {
       e = err
