@@ -17,10 +17,10 @@ var (
 func init() {
   flag.StringVar(&host, "host", "127.0.0.1", "host address on which to listen")
   flag.IntVar(&port, "port", 9999, "port on which to listen")
-  flag.Parse()
 }
 
 func main() {
+  flag.Parse()
   runtime.GOMAXPROCS(runtime.NumCPU())
   logger := log.NewLogger(os.Stdout, log.INFO)
   app := webapp.NewWebapp(host, port, logger)
